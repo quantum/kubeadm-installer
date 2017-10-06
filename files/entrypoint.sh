@@ -206,7 +206,9 @@ else
   echo "Ignoring ${BIN_DIR}/kubectl, since it seems to exist already"
 fi
 
-if [[ ! -f ${ROOTFS}/${BIN_DIR}/kubelet && ${INSTALL_KUBELET} == 1 ]]; then
+if [[ ${INSTALL_KUBELET} == 0 ]]; then
+  true;
+elif [[ ! -f ${ROOTFS}/${BIN_DIR}/kubelet ]]; then
   curl -sSL ${K8S_URL}/${K8S_VERSION}/bin/linux/${ARCH}/kubelet > ${ROOTFS}/${BIN_DIR}/kubelet
   chmod +x ${ROOTFS}/${BIN_DIR}/kubelet
   echo "Installed kubelet in ${BIN_DIR}/kubelet"
@@ -228,9 +230,9 @@ if [[ ! -d ${ROOTFS}/${CNI_BIN_DIR} ]]; then
   if [[ -n "${CNI_PLUGINS_URL}" ]]; then
     curl -sSL ${CNI_PLUGINS_URL} | tar -xz -C ${ROOTFS}/${CNI_BIN_DIR}
   fi
-  echo "Installed CNI binaries in /opt/cni"
+  echo "Installed CNI binaries in ${CNI_BIN_DIR}"
 else
-  echo "Ignoring /opt/cni, since it seems to exist already"
+  echo "Ignoring ${CNI_BIN_DIR}, since it seems to exist already"
 fi
 
 if [[ ! -f ${ROOTFS}/etc/systemd/system/kubelet.service ]]; then
@@ -250,7 +252,7 @@ if [[ ! -f ${ROOTFS}/etc/systemd/system/kubelet.service ]]; then
     --pod-manifest-path=/etc/kubernetes/manifests \
     --allow-privileged=true \
     --network-plugin=cni \
-    --cni-conf-dir=/etc/cni/net.d --cni-bin-dir=/opt/cni/bin \
+    --cni-conf-dir=/etc/cni/net.d --cni-bin-dir=${CNI_BIN_DIR} \
     --cluster-dns=10.96.0.10 --cluster-domain=cluster.local
   Restart=always
   StartLimitInterval=0
