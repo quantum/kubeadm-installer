@@ -36,10 +36,37 @@ ROOTFS=${ROOTFS:-/rootfs}
 
 # Helpers
 # --
+fail()
+{
+  echo "$*"
+  exit 1
+}
+
+usage()
+{
+  cat <<-EOF
+	  Hi, you should run this container like this:
+	  docker run -it \
+	    -v /etc/:/rootfs/etc \
+	    -v /usr:/rootfs/usr \
+	    -v /opt:/rootfs/opt \
+	    xakra/kubeadm-installer your_os_here
+
+	  your_os_here can be coreos, ubuntu, debian, fedora or centos
+
+	  You can also revert this action with running:
+	  docker run -it \
+	    -v /etc/:/rootfs/etc \
+	    -v /usr:/rootfs/usr \
+	    -v /opt:/rootfs/opt \
+	    xakra/kubeadm-installer your_os_here uninstall
+	EOF
+}
+
 get_git_latest_release() {
-  curl --silent "https://api.github.com/repos/${1}/releases/latest" \
-    | grep '"tag_name":' \
-    | sed -E 's/.*"([^"]+)".*/\1/'
+  local url="https://api.github.com/repos/${1}/releases/latest"
+  curl --silent ${url} | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || \
+    fail "Failed to get latest release from ${url}"
 }
 
 print_systemd() {
@@ -57,7 +84,7 @@ print_systemd() {
 
 	[[ uninstall == "$action" ]] \
   	&& cat <<- EOF
-	Done! Now run this in your terminal to complet uninstall:
+	Done! Now run this in your terminal to complete the uninstall:
 
 	systemctl daemon-reload
 	systemctl disable kubelet
@@ -138,7 +165,8 @@ fi
 #
 # Environment settings according to Distro
 #
-if [[ ${distro} == "coreos" ]]; then
+case ${distro} in
+coreos)
   BIN_DIR=${BIN_DIR:-/opt/bin}
   KUBELET_EXEC=${KUBELET_EXEC:-/usr/lib/coreos/kubelet-wrapper}
   EXTRA_ENVIRONMENT=${EXTRA_ENVIRONMENT:-"RKT_RUN_ARGS=\
@@ -147,33 +175,20 @@ if [[ ${distro} == "coreos" ]]; then
 --volume etc-cni,kind=host,source=/etc/cni \
 --mount volume=etc-cni,target=/etc/cni"}
   INSTALL_KUBELET=0
+  ;;
 
-elif [[ ${distro} == "ubuntu" || ${distro} == "debian" || ${distro} == "fedora" || ${distro} == "centos" ]]; then
+ubuntu|debian|fedora|centos)
   BIN_DIR=${BIN_DIR:-/usr/bin}
   KUBELET_EXEC=${KUBELET_EXEC:-${BIN_DIR}/kubelet}
   EXTRA_ENVIRONMENT=${EXTRA_ENVIRONMENT:-"NOOP=true"}
   INSTALL_KUBELET=1
+  ;;
 
-else
-cat <<-EOF
-  Hi, you should run this container like this:
-  docker run -it \
-    -v /etc/:/rootfs/etc \
-    -v /usr:/rootfs/usr \
-    -v /opt:/rootfs/opt \
-    xakra/kubeadm-installer your_os_here
-
-  your_os_here can be coreos, ubuntu, debian, fedora or centos
-
-  You can also revert this action with running:
-  docker run -it \
-    -v /etc/:/rootfs/etc \
-    -v /usr:/rootfs/usr \
-    -v /opt:/rootfs/opt \
-    xakra/kubeadm-installer your_os_here uninstall
-EOF
-exit 1
-fi
+*)
+  usage
+  exit 1
+  ;;
+esac
 
 
 # Main
@@ -199,9 +214,14 @@ mkdir -p ${ROOTFS}/etc/cni \
   ${ROOTFS}/${BIN_DIR}
 
 if [[ ! -f ${ROOTFS}/${BIN_DIR}/kubectl ]]; then
-  curl -sSL ${K8S_URL}/${K8S_VERSION}/bin/linux/${ARCH}/kubectl > ${ROOTFS}/${BIN_DIR}/kubectl
-  chmod +x ${ROOTFS}/${BIN_DIR}/kubectl
-  echo "Installed kubectl in ${BIN_DIR}/kubectl"
+  echo "Downloading kubectl to ${BIN_DIR}/kubectl"
+  if curl -sSL ${K8S_URL}/${K8S_VERSION}/bin/linux/${ARCH}/kubectl > ${ROOTFS}/${BIN_DIR}/kubectl; then
+    chmod +x ${ROOTFS}/${BIN_DIR}/kubectl
+    echo "Installed kubectl in ${BIN_DIR}/kubectl"
+  else
+    rm -f ${ROOTFS}/${BIN_DIR}/kubectl
+    fail "Failed to download kubectl"
+  fi
 else
   echo "Ignoring ${BIN_DIR}/kubectl, since it seems to exist already"
 fi
@@ -209,28 +229,49 @@ fi
 if [[ ${INSTALL_KUBELET} == 0 ]]; then
   true;
 elif [[ ! -f ${ROOTFS}/${BIN_DIR}/kubelet ]]; then
-  curl -sSL ${K8S_URL}/${K8S_VERSION}/bin/linux/${ARCH}/kubelet > ${ROOTFS}/${BIN_DIR}/kubelet
-  chmod +x ${ROOTFS}/${BIN_DIR}/kubelet
-  echo "Installed kubelet in ${BIN_DIR}/kubelet"
+  echo "Downloading kubelet to ${BIN_DIR}/kubelet"
+  if curl -sSL ${K8S_URL}/${K8S_VERSION}/bin/linux/${ARCH}/kubelet > ${ROOTFS}/${BIN_DIR}/kubelet; then
+    chmod +x ${ROOTFS}/${BIN_DIR}/kubelet
+    echo "Installed kubelet in ${BIN_DIR}/kubelet"
+  else
+    rm -f ${ROOTFS}/${BIN_DIR}/kubelet
+    fail "Failed to download kubelet"
+  fi
 else
   echo "Ignoring ${BIN_DIR}/kubelet, since it seems to exist already"
 fi
 
 if [[ ! -f ${ROOTFS}/${BIN_DIR}/kubeadm ]]; then
-  curl -sSL ${KUBEADM_URL}/${KUBEADM_RELEASE}/bin/linux/${ARCH}/kubeadm > ${ROOTFS}/${BIN_DIR}/kubeadm
-  chmod +x ${ROOTFS}/${BIN_DIR}/kubeadm
-  echo "Installed kubeadm in ${BIN_DIR}/kubeadm"
+  echo "Downloading kubeadm to ${BIN_DIR}/kubeadm"
+  if curl -sSL ${KUBEADM_URL}/${KUBEADM_RELEASE}/bin/linux/${ARCH}/kubeadm > ${ROOTFS}/${BIN_DIR}/kubeadm; then
+    chmod +x ${ROOTFS}/${BIN_DIR}/kubeadm
+    echo "Installed kubeadm in ${BIN_DIR}/kubeadm"
+  else
+    rm -f ${ROOTFS}/${BIN_DIR}/kubeadm
+    fail "Failed to download kubeadm"
+  fi
 else
   echo "Ignoring ${BIN_DIR}/kubeadm, since it seems to exist already"
 fi
 
 if [[ ! -d ${ROOTFS}/${CNI_BIN_DIR} ]]; then
   mkdir -p ${ROOTFS}/${CNI_BIN_DIR}
-  curl -sSL ${CNI_URL} | tar -xz -C ${ROOTFS}/${CNI_BIN_DIR}
-  if [[ -n "${CNI_PLUGINS_URL}" ]]; then
-    curl -sSL ${CNI_PLUGINS_URL} | tar -xz -C ${ROOTFS}/${CNI_BIN_DIR}
+  echo "Downloading CNI binaries to ${CNI_BIN_DIR}"
+  if curl -sSL ${CNI_URL} | tar -xz -C ${ROOTFS}/${CNI_BIN_DIR}; then
+    echo "Installed CNI binaries in ${CNI_BIN_DIR}"
+    if [[ -n "${CNI_PLUGINS_URL}" ]]; then
+      echo "Downloading CNI plugins to ${CNI_BIN_DIR}"
+      if curl -sSL ${CNI_PLUGINS_URL} | tar -xz -C ${ROOTFS}/${CNI_BIN_DIR}; then
+        echo "Installed CNI plugins in ${CNI_BIN_DIR}"
+      else
+        rm -rf ${ROOTFS}/${CNI_BIN_DIR}
+        fail "Failed to download CNI plugins"
+      fi
+    fi
+  else
+    rm -rf ${ROOTFS}/${CNI_BIN_DIR}
+    fail "Failed to download CNI binaries"
   fi
-  echo "Installed CNI binaries in ${CNI_BIN_DIR}"
 else
   echo "Ignoring ${CNI_BIN_DIR}, since it seems to exist already"
 fi
